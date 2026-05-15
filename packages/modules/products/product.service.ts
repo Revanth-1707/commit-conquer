@@ -1,4 +1,4 @@
-import { type Product, type PaginatedResponse } from "../../core/types";
+import { type Product, type ProductVariant, type PaginatedResponse } from "../../core/types";
 import { paginate, stripEmpty } from "../../core/utils";
 import { eventBus, EVENT } from "../../core/event-bus";
 import { ProductModel } from "./product.model";
@@ -37,6 +37,13 @@ export interface UpdateProductInput {
   category?: string;
   tags?: string[];
   status?: "published" | "draft" | "archived";
+  variants?: Array<Partial<ProductVariant> & {
+    title: string;
+    sku: string;
+    price: number;
+    inventory_quantity: number;
+    options: Record<string, string>;
+  }>;
 }
 
 export const ProductService = {
@@ -124,11 +131,33 @@ export const ProductService = {
   },
 
   async update(id: string, input: UpdateProductInput): Promise<Product> {
-    ProductService.getById(id);
+    const existing = ProductService.getById(id);
+
+    if (input.variants) {
+      _validateVariants(input.variants);
+    }
 
     const changes = stripEmpty(
       input as Record<string, unknown>,
     ) as Partial<Product>;
+
+    if (input.variants) {
+      changes.variants = input.variants.map((variant) => ({
+        id: variant.id ?? `var_${Math.random().toString(36).slice(2, 9)}`,
+        title: variant.title,
+        sku: variant.sku,
+        price: variant.price,
+        inventory_quantity: variant.inventory_quantity,
+        options: variant.options ?? {},
+      }));
+    }
+
+    const removedVariantIds = input.variants
+      ? existing.variants
+          .filter((variant) => !changes.variants?.some((next) => next.id === variant.id))
+          .map((variant) => variant.id)
+      : [];
+
     const updated = ProductModel.update(id, changes);
 
     if (!updated) {
@@ -137,7 +166,10 @@ export const ProductService = {
 
     await eventBus.emit(EVENT.PRODUCT_UPDATED, {
       product_id: id,
-      changes: changes as Record<string, unknown>,
+      changes: {
+        ...(changes as Record<string, unknown>),
+        removed_variant_ids: removedVariantIds,
+      },
     });
     return updated;
   },
@@ -297,6 +329,37 @@ function _validateCreate(input: CreateProductInput): void {
       throw new ServiceError(
         "VALIDATION_ERROR",
         `Variant price must be a non-negative number`,
+      );
+    }
+  }
+}
+
+
+function _validateVariants(input: UpdateProductInput["variants"]): void {
+  if (!input || input.length === 0) {
+    throw new ServiceError(
+      "VALIDATION_ERROR",
+      "At least one variant is required",
+    );
+  }
+
+  for (const v of input) {
+    if (!v.title?.trim()) {
+      throw new ServiceError("VALIDATION_ERROR", "Variant title is required");
+    }
+    if (!v.sku?.trim()) {
+      throw new ServiceError("VALIDATION_ERROR", "Variant SKU is required");
+    }
+    if (typeof v.price !== "number" || v.price < 0) {
+      throw new ServiceError(
+        "VALIDATION_ERROR",
+        "Variant price must be a non-negative number",
+      );
+    }
+    if (typeof v.inventory_quantity !== "number" || v.inventory_quantity < 0) {
+      throw new ServiceError(
+        "VALIDATION_ERROR",
+        "Variant inventory must be a non-negative number",
       );
     }
   }

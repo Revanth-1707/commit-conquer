@@ -66,7 +66,14 @@ export const CartService = {
   get(cartId: string): Cart {
     const cart = carts.get(cartId);
     if (!cart) throw new ServiceError("CART_NOT_FOUND", `Cart ${cartId} not found`);
-    return cart;
+
+    const { cart: reconciled, changed } = _reconcileCartItems(cart);
+    if (changed) {
+      carts.set(cartId, reconciled);
+      eventBus.emitSync(EVENT.CART_UPDATED, { cart_id: cartId });
+    }
+
+    return reconciled;
   },
 
   
@@ -169,15 +176,29 @@ export const CartService = {
       throw new ServiceError("ITEM_NOT_FOUND", `Line item ${lineItemId} not in cart`);
     }
 
-    // Stock check
+    // Reject quantity changes for stale product/variant references instead of
+    // allowing an orphaned line to continue into checkout.
     const variant = ProductModel.findVariant(line.product_id, line.variant_id);
-    if (variant && variant.inventory_quantity < quantity) {
+    if (!variant) {
+      cart.items = cart.items.filter((i) => i.id !== lineItemId);
+      const updated = _recalc(cart);
+      carts.set(cartId, updated);
+      await eventBus.emit(EVENT.CART_UPDATED, { cart_id: cartId });
+      throw new ServiceError(
+        "VARIANT_NOT_FOUND",
+        "This item is no longer available and was removed from the cart",
+      );
+    }
+
+    if (variant.inventory_quantity < quantity) {
       throw new ServiceError(
         "INSUFFICIENT_STOCK",
         `Only ${variant.inventory_quantity} units available`,
       );
     }
 
+    line.variant_title = variant.title;
+    line.price = variant.price;
     line.quantity = quantity;
 
     const updated = _recalc(cart);
@@ -257,6 +278,17 @@ export const CartService = {
 
   async complete(cartId: string): Promise<{ cart: Cart; order_id: string }> {
     const cart = CartService.get(cartId);
+    const { removedItems } = _reconcileCartItems(cart);
+
+    if (removedItems.length > 0) {
+      const updated = _recalc(cart);
+      carts.set(cartId, updated);
+      await eventBus.emit(EVENT.CART_UPDATED, { cart_id: cartId });
+      throw new ServiceError(
+        "CART_HAS_UNAVAILABLE_ITEMS",
+        "Some items are no longer available and were removed from your cart. Please review your cart before checkout.",
+      );
+    }
 
     
     if (!cart.email) {
@@ -296,6 +328,32 @@ export const CartService = {
     return updated;
   },
 
+  reconcile(cartId: string): Cart {
+    const cart = CartService.get(cartId);
+    const { cart: reconciled } = _reconcileCartItems(cart);
+    const updated = _recalc(reconciled);
+    carts.set(cartId, updated);
+    return updated;
+  },
+
+  purgeUnavailableProductItems(productId: string): number {
+    let removed = 0;
+
+    for (const [cartId, cart] of carts.entries()) {
+      const before = cart.items.length;
+      const { cart: reconciled } = _reconcileCartItems(cart, productId);
+      const removedFromCart = before - reconciled.items.length;
+
+      if (removedFromCart > 0) {
+        removed += removedFromCart;
+        carts.set(cartId, _recalc(reconciled));
+        eventBus.emitSync(EVENT.CART_UPDATED, { cart_id: cartId });
+      }
+    }
+
+    return removed;
+  },
+
   
 
   summary(cartId: string): {
@@ -317,6 +375,64 @@ export const CartService = {
     };
   },
 };
+
+
+
+function _reconcileCartItems(
+  cart: Cart,
+  onlyProductId?: string,
+): { cart: Cart; changed: boolean; removedItems: CartItem[] } {
+  let changed = false;
+  const removedItems: CartItem[] = [];
+  const nextItems: CartItem[] = [];
+
+  for (const item of cart.items) {
+    if (onlyProductId && item.product_id !== onlyProductId) {
+      nextItems.push(item);
+      continue;
+    }
+
+    const product = ProductModel.findById(item.product_id);
+    const variant = product?.variants.find((v) => v.id === item.variant_id);
+
+    if (!product || !variant || product.status === "archived") {
+      removedItems.push(item);
+      changed = true;
+      continue;
+    }
+
+    if (
+      item.title !== product.title ||
+      item.thumbnail !== product.thumbnail ||
+      item.variant_title !== variant.title ||
+      item.price !== variant.price
+    ) {
+      changed = true;
+      nextItems.push({
+        ...item,
+        title: product.title,
+        thumbnail: product.thumbnail,
+        variant_title: variant.title,
+        price: variant.price,
+      });
+      continue;
+    }
+
+    nextItems.push(item);
+  }
+
+  if (!changed) {
+    return { cart, changed, removedItems };
+  }
+
+  const nextCart = _recalc({
+    ...cart,
+    items: nextItems,
+    discount_code: nextItems.length === 0 ? undefined : cart.discount_code,
+  });
+
+  return { cart: nextCart, changed, removedItems };
+}
 
 
 
@@ -355,3 +471,21 @@ function _recalc(cart: Cart): Cart {
     updated_at:      new Date().toISOString(),
   };
 }
+
+// Keep active carts consistent when admin product updates remove variants,
+// change prices/titles, or archive/delete products. This prevents stale cart
+// lines from reaching checkout with orphaned variant ids or old prices.
+eventBus.on(EVENT.PRODUCT_UPDATED, ({ product_id, changes }) => {
+  if (
+    Object.prototype.hasOwnProperty.call(changes, "variants") ||
+    Object.prototype.hasOwnProperty.call(changes, "status") ||
+    Object.prototype.hasOwnProperty.call(changes, "title") ||
+    Object.prototype.hasOwnProperty.call(changes, "thumbnail")
+  ) {
+    CartService.purgeUnavailableProductItems(product_id);
+  }
+});
+
+eventBus.on(EVENT.PRODUCT_DELETED, ({ product_id }) => {
+  CartService.purgeUnavailableProductItems(product_id);
+});
