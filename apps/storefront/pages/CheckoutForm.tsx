@@ -74,7 +74,7 @@ const css = `
   @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;500;600;700;800&display=swap');
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-  :root {
+  :root:not([data-theme]) {
     --bg: #0c0c0e; --surface: #141417; --surface2: #1c1c21;
     --border: #2a2a31; --border-hover: #404050;
     --text: #e8e8f0; --text-muted: #6b6b80; --text-dim: #9999aa;
