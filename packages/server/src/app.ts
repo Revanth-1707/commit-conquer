@@ -13,10 +13,12 @@ import { authenticate } from './middleware/authenticate';
 import { validateBody } from './middleware/validateBody';
 import { errorHandler } from './middleware/errorHandler';
 import { assertOAuthConfig } from './utils/oauthConfig';
+import { requestMonitoring } from './utils/monitoring';
 import rateLimit from 'express-rate-limit';
 
 export function createApp() {
   const app = express();
+  app.use(requestMonitoring);
   app.use(express.json());
 
   // ── OAuth environment validation ───────────────────────────────────────────

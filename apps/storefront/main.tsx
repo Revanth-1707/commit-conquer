@@ -5,6 +5,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import Layout from "./Layout";
 import UnifiedDashboard from "./pages/UnifiedDashboard";
+import { ErrorBoundary } from "./ErrorBoundary";
 
 
 const StorefrontHome = lazy(() => import("./pages/index"));
@@ -44,7 +45,8 @@ if (!rootEl) throw new Error("Root element #root not found in index.html");
 
 createRoot(rootEl).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <Suspense fallback={<PageLoader />}>
           <Routes>
@@ -75,5 +77,6 @@ createRoot(rootEl).render(
         </Suspense>
       </BrowserRouter>
     </QueryClientProvider>
+    </ErrorBoundary>
   </StrictMode>,
 );
