@@ -302,11 +302,14 @@ export default function CheckoutForm() {
   const [discountError, setDiscountError] = useState<string | null>(null);
 
   const TAX_RATE = 0.08;
-  const discountAmt = discountApplied ? Math.round(total * 0.1) : 0;
-  const subtotal = total * 100;
+  const subtotal = Math.round(
+    items.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 0), 0) * 100,
+  );
+  const discountAmt = discountApplied ? Math.round(subtotal * 0.1) : 0;
+  const taxableSubtotal = Math.max(subtotal - discountAmt, 0);
   const shipping = shippingOption.price;
-  const tax = Math.round((subtotal - discountAmt) * TAX_RATE);
-  const grandTotal = subtotal - discountAmt + shipping + tax;
+  const tax = Math.round(taxableSubtotal * TAX_RATE);
+  const grandTotal = taxableSubtotal + shipping + tax;
 
   const stepIdx = STEPS.findIndex((s) => s.key === step);
 

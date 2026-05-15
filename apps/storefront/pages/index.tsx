@@ -1,6 +1,6 @@
 
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useCartState, useCartDispatch } from "../Layout";
 import CartDrawer from "../CartDrawer";
@@ -61,12 +61,14 @@ async function fetchProducts({
   category,
   sortBy,
   tags,
+  maxPrice,
 }: {
   pageParam?: number;
   search: string;
   category: string;
   sortBy: string;
   tags: string[];
+  maxPrice?: number;
 }): Promise<FetchResult> {
   await new Promise((r) => setTimeout(r, 400));
   const LIMIT = 12;
@@ -82,6 +84,8 @@ async function fetchProducts({
     result = result.filter((p) => p.category === category);
   if (tags.length)
     result = result.filter((p) => tags.some((t) => p.tags.includes(t)));
+  if (typeof maxPrice === "number")
+    result = result.filter((p) => p.price <= maxPrice);
 
   if (sortBy === "price-lo") result.sort((a, b) => a.price - b.price);
   else if (sortBy === "price-hi") result.sort((a, b) => b.price - a.price);
@@ -581,13 +585,48 @@ export default function StorefrontPage() {
     return () => clearTimeout(t);
   }, [search]);
 
+  const productFilters = useMemo(() => {
+    const normalizedTags = [...activeTags].sort();
+
+    return {
+      search: debouncedSearch.trim().toLowerCase(),
+      category,
+      sortBy,
+      tags: normalizedTags,
+      maxPrice,
+    };
+  }, [debouncedSearch, category, sortBy, activeTags, maxPrice]);
+
+  const productQueryKey = useMemo(
+    () => [
+      "storefront-products",
+      "v2",
+      productFilters.search,
+      productFilters.category,
+      productFilters.sortBy,
+      productFilters.maxPrice,
+      productFilters.tags.join("|"),
+    ],
+    [productFilters],
+  );
+
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, isFetching } =
     useInfiniteQuery({
-      queryKey: ["storefront-products", { search: debouncedSearch, category, sortBy, tags: activeTags }],
+      queryKey: productQueryKey,
       queryFn: ({ pageParam }) =>
-        fetchProducts({ pageParam: pageParam as number, search: debouncedSearch, category, sortBy, tags: activeTags }),
+        fetchProducts({
+          pageParam: pageParam as number,
+          search: productFilters.search,
+          category: productFilters.category,
+          sortBy: productFilters.sortBy,
+          tags: productFilters.tags,
+          maxPrice: productFilters.maxPrice,
+        }),
       getNextPageParam: (last) => last.nextPage,
       initialPageParam: 0,
+      staleTime: 10_000,
+      gcTime: 2 * 60_000,
+      refetchOnWindowFocus: true,
     });
 
 
@@ -822,7 +861,6 @@ export default function StorefrontPage() {
                 </div>
               )
               : allProducts
-                  .filter((p) => p.price <= maxPrice)
                   .map((product) => (
                     <ProductCard
                       key={product.id}
