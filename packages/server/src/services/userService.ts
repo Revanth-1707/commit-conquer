@@ -92,4 +92,28 @@ export class UserService {
     user.totalPoints += points;
     return toPublic(user);
   }
+
+  /**
+   * Returns the internal user ID for the given email, or null if not found.
+   * Used by PasswordResetService — returns null instead of throwing so the
+   * reset endpoint can respond identically whether or not the email exists
+   * (prevents user enumeration).
+   */
+  async getUserIdByEmail(email: string): Promise<string | null> {
+    const user = store.find((u) => u.email === email);
+    return user ? user.id : null;
+  }
+
+  /**
+   * Applies a new password for the given user ID.
+   * Called by PasswordResetService after it has validated the reset token.
+   */
+  async resetPassword(userId: string, newPassword: string): Promise<void> {
+    const user = store.find((u) => u.id === userId);
+    if (!user) throw new AppError(`User ${userId} not found`, 404);
+    if (!newPassword || !newPassword.trim()) {
+      throw new AppError('New password is required', 400);
+    }
+    user.passwordHash = hashString(newPassword);
+  }
 }
