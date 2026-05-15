@@ -28,6 +28,8 @@ interface FetchResult {
 }
 
 
+const MAX_VISIBLE_PRODUCT_TAGS = 2;
+
 const PRODUCT_DATA: Product[] = Array.from({ length: 60 }, (_, i) => {
   const titles = [
     "Obsidian Crew Neck", "Slate Cargo Pant", "Onyx Hoodie", "Granite Bomber",
@@ -325,6 +327,7 @@ const css = `
   .badge-sale { background: var(--red-dim); color: var(--red); border: 1px solid rgba(255,92,92,0.3); }
   .badge-bestseller { background: var(--amber-dim); color: var(--amber); border: 1px solid rgba(245,166,35,0.3); }
   .badge-limited { background: var(--green-dim); color: var(--green); border: 1px solid rgba(61,220,151,0.3); }
+  .badge-more { background: var(--surface2); color: var(--text-dim); border: 1px solid var(--border); }
 
   .card-quick-add {
     position: absolute; bottom: 0; left: 0; right: 0;
@@ -460,10 +463,19 @@ function ProductCard({
 
         
         {product.tags.length > 0 && (
-          <div className="card-badges">
-            {product.tags.map((tag) => (
+          <div className="card-badges" aria-label={`${product.tags.length} product tags`}>
+            {product.tags.slice(0, MAX_VISIBLE_PRODUCT_TAGS).map((tag) => (
               <span key={tag} className={`card-badge badge-${tag}`}>{tag}</span>
             ))}
+            {product.tags.length > MAX_VISIBLE_PRODUCT_TAGS && (
+              <span
+                className="card-badge badge-more"
+                title={product.tags.slice(MAX_VISIBLE_PRODUCT_TAGS).join(", ")}
+                aria-label={`${product.tags.length - MAX_VISIBLE_PRODUCT_TAGS} more product tags`}
+              >
+                +{product.tags.length - MAX_VISIBLE_PRODUCT_TAGS}
+              </span>
+            )}
           </div>
         )}
 
